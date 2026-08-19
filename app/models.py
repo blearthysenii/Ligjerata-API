@@ -83,7 +83,14 @@ class Lecture(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
 
-    audio_url = Column(String(500), nullable=False)
+    media_type = Column(
+        String(20),
+        nullable=False,
+        default="audio",
+        server_default="audio",
+    )
+    audio_url = Column(String(500), nullable=True)
+    youtube_url = Column(String(500), nullable=True)
 
     duration_seconds = Column(Integer, nullable=True)
 
