@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.core.admin import require_admin
 
 router = APIRouter(
     prefix="/categories",
@@ -13,6 +14,7 @@ router = APIRouter(
 @router.post("/", response_model=schemas.CategoryResponse)
 def create_category(
     category: schemas.CategoryCreate,
+    _admin: models.User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     db_category = models.Category(
@@ -71,5 +73,7 @@ def get_category_lectures(
         )
 
     return db.query(models.Lecture).filter(
-        models.Lecture.category_id == category_id
+        models.Lecture.category_id == category_id,
+        models.Lecture.media_type == "audio",
+        models.Lecture.audio_url.isnot(None),
     ).all()
