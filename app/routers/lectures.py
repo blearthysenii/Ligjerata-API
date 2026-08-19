@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app import models, schemas
@@ -54,6 +55,51 @@ def create_lecture(
 @router.get("/", response_model=list[schemas.LectureResponse])
 def get_lectures(db: Session = Depends(get_db)):
     return db.query(models.Lecture).all()
+
+
+@router.get(
+    "/search",
+    response_model=list[schemas.LectureResponse],
+)
+def search_lectures(
+    q: str = Query(min_length=1, max_length=100),
+    db: Session = Depends(get_db),
+):
+    query = q.strip()
+
+    if not query:
+        return []
+
+    escaped_query = (
+        query.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    pattern = f"%{escaped_query}%"
+
+    return (
+        db.query(models.Lecture)
+        .join(models.Lecture.speaker)
+        .join(models.Lecture.category)
+        .filter(
+            or_(
+                models.Lecture.title.ilike(
+                    pattern,
+                    escape="\\",
+                ),
+                models.Speaker.name.ilike(
+                    pattern,
+                    escape="\\",
+                ),
+                models.Category.name.ilike(
+                    pattern,
+                    escape="\\",
+                ),
+            )
+        )
+        .order_by(models.Lecture.id.desc())
+        .all()
+    )
 
 
 @router.get("/{lecture_id}", response_model=schemas.LectureResponse)
