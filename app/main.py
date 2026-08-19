@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from app import models
 from app.database import Base, engine
-from app.routers import auth, categories, lectures, speakers
+from app.routers import auth, categories, lectures, me, speakers
 
 
 app = FastAPI(
@@ -35,6 +35,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(me.router)
 app.include_router(speakers.router)
 app.include_router(categories.router)
 app.include_router(lectures.router)
