@@ -96,3 +96,28 @@ class LectureResponse(LectureBase):
     category: CategoryResponse
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ListeningProgressUpdate(BaseModel):
+    position_seconds: int = Field(ge=0)
+    duration_seconds: int = Field(ge=0)
+    completed: bool = False
+
+
+class ListeningProgressResponse(BaseModel):
+    id: int
+    position_seconds: int
+    duration_seconds: int
+    completed: bool
+    updated_at: datetime
+    lecture: LectureResponse
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SavedLectureResponse(BaseModel):
+    id: int
+    created_at: datetime
+    lecture: LectureResponse
+
+    model_config = ConfigDict(from_attributes=True)
