@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from urllib.parse import urlparse
 
 from app import models, schemas
 from app.database import get_db
+from app.core.admin import require_admin
 
 router = APIRouter(
     prefix="/lectures",
@@ -14,8 +16,26 @@ router = APIRouter(
 @router.post("/", response_model=schemas.LectureResponse)
 def create_lecture(
     lecture: schemas.LectureCreate,
+    _admin: models.User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    hostname = (urlparse(lecture.audio_url or "").hostname or "").lower()
+    if (
+        lecture.media_type != "audio"
+        or not lecture.audio_url
+        or not lecture.duration_seconds
+        or lecture.duration_seconds <= 0
+        or hostname in {
+            "youtube.com",
+            "www.youtube.com",
+            "m.youtube.com",
+            "youtu.be",
+        }
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Lecture media must be processed before publishing",
+        )
     speaker = db.query(models.Speaker).filter(
         models.Speaker.id == lecture.speaker_id
     ).first()
@@ -39,7 +59,9 @@ def create_lecture(
     db_lecture = models.Lecture(
         title=lecture.title,
         description=lecture.description,
+        media_type=lecture.media_type,
         audio_url=lecture.audio_url,
+        youtube_url=lecture.youtube_url,
         duration_seconds=lecture.duration_seconds,
         speaker_id=lecture.speaker_id,
         category_id=lecture.category_id,
@@ -54,7 +76,10 @@ def create_lecture(
 
 @router.get("/", response_model=list[schemas.LectureResponse])
 def get_lectures(db: Session = Depends(get_db)):
-    return db.query(models.Lecture).all()
+    return db.query(models.Lecture).filter(
+        models.Lecture.media_type == "audio",
+        models.Lecture.audio_url.isnot(None),
+    ).all()
 
 
 @router.get(
@@ -82,6 +107,8 @@ def search_lectures(
         .join(models.Lecture.speaker)
         .join(models.Lecture.category)
         .filter(
+            models.Lecture.media_type == "audio",
+            models.Lecture.audio_url.isnot(None),
             or_(
                 models.Lecture.title.ilike(
                     pattern,
@@ -108,7 +135,9 @@ def get_lecture(
     db: Session = Depends(get_db),
 ):
     lecture = db.query(models.Lecture).filter(
-        models.Lecture.id == lecture_id
+        models.Lecture.id == lecture_id,
+        models.Lecture.media_type == "audio",
+        models.Lecture.audio_url.isnot(None),
     ).first()
 
     if not lecture:
