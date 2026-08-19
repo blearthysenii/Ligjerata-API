@@ -18,7 +18,9 @@ def get_lecture_or_404(
     db: Session,
 ) -> models.Lecture:
     lecture = db.query(models.Lecture).filter(
-        models.Lecture.id == lecture_id
+        models.Lecture.id == lecture_id,
+        models.Lecture.media_type == "audio",
+        models.Lecture.audio_url.isnot(None),
     ).first()
 
     if not lecture:
@@ -40,6 +42,7 @@ def get_listening_progress(
 ):
     return (
         db.query(models.ListeningProgress)
+        .join(models.ListeningProgress.lecture)
         .options(
             joinedload(models.ListeningProgress.lecture)
             .joinedload(models.Lecture.speaker),
@@ -47,7 +50,9 @@ def get_listening_progress(
             .joinedload(models.Lecture.category),
         )
         .filter(
-            models.ListeningProgress.user_id == current_user.id
+            models.ListeningProgress.user_id == current_user.id,
+            models.Lecture.media_type == "audio",
+            models.Lecture.audio_url.isnot(None),
         )
         .order_by(models.ListeningProgress.updated_at.desc())
         .all()
@@ -65,6 +70,7 @@ def get_lecture_progress(
 ):
     progress = (
         db.query(models.ListeningProgress)
+        .join(models.ListeningProgress.lecture)
         .options(
             joinedload(models.ListeningProgress.lecture)
             .joinedload(models.Lecture.speaker),
@@ -74,6 +80,8 @@ def get_lecture_progress(
         .filter(
             models.ListeningProgress.user_id == current_user.id,
             models.ListeningProgress.lecture_id == lecture_id,
+            models.Lecture.media_type == "audio",
+            models.Lecture.audio_url.isnot(None),
         )
         .first()
     )
@@ -140,6 +148,7 @@ def get_saved_lectures(
 ):
     return (
         db.query(models.SavedLecture)
+        .join(models.SavedLecture.lecture)
         .options(
             joinedload(models.SavedLecture.lecture)
             .joinedload(models.Lecture.speaker),
@@ -147,6 +156,10 @@ def get_saved_lectures(
             .joinedload(models.Lecture.category),
         )
         .filter(models.SavedLecture.user_id == current_user.id)
+        .filter(
+            models.Lecture.media_type == "audio",
+            models.Lecture.audio_url.isnot(None),
+        )
         .order_by(models.SavedLecture.created_at.desc())
         .all()
     )
