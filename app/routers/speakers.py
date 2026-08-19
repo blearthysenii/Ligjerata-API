@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.database import get_db
+from app.core.admin import require_admin
 
 router = APIRouter(
     prefix="/speakers",
@@ -13,6 +14,7 @@ router = APIRouter(
 @router.post("/", response_model=schemas.SpeakerResponse)
 def create_speaker(
     speaker: schemas.SpeakerCreate,
+    _admin: models.User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     db_speaker = models.Speaker(
@@ -72,5 +74,7 @@ def get_speaker_lectures(
         )
 
     return db.query(models.Lecture).filter(
-        models.Lecture.speaker_id == speaker_id
+        models.Lecture.speaker_id == speaker_id,
+        models.Lecture.media_type == "audio",
+        models.Lecture.audio_url.isnot(None),
     ).all()
