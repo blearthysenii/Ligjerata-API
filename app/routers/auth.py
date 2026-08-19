@@ -33,12 +33,21 @@ def normalize_email(email: str) -> str:
 
 
 def create_token_response(user: models.User) -> schemas.TokenResponse:
+    from app.core.admin import is_admin_email
+
     token, expires_in = create_access_token(str(user.id))
 
     return schemas.TokenResponse(
         access_token=token,
         expires_in=expires_in,
-        user=user,
+        user=schemas.UserResponse(
+            id=user.id,
+            full_name=user.full_name,
+            email=user.email,
+            is_active=user.is_active,
+            is_admin=is_admin_email(user.email),
+            created_at=user.created_at,
+        ),
     )
 
 
@@ -143,4 +152,13 @@ def login(
 def me(
     current_user: models.User = Depends(get_current_user),
 ):
-    return current_user
+    from app.core.admin import is_admin_email
+
+    return schemas.UserResponse(
+        id=current_user.id,
+        full_name=current_user.full_name,
+        email=current_user.email,
+        is_active=current_user.is_active,
+        is_admin=is_admin_email(current_user.email),
+        created_at=current_user.created_at,
+    )
