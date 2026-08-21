@@ -1,4 +1,6 @@
 import os
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -57,3 +59,8 @@ def decode_access_token(token: str) -> str:
         raise jwt.InvalidTokenError("Token subject is missing")
 
     return str(subject)
+
+
+def hash_reset_code(user_id: int, code: str) -> str:
+    value = f"{user_id}:{code}".encode()
+    return hmac.new(JWT_SECRET_KEY.encode(), value, hashlib.sha256).hexdigest()
