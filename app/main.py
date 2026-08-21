@@ -6,8 +6,8 @@ from sqlalchemy import text
 
 from app import models
 from app.database import Base, engine
-from app.database_migrations import migrate_lecture_media_columns
-from app.routers import admin, auth, categories, lectures, me, speakers
+from app.database_migrations import migrate_follows, migrate_lecture_media_columns, migrate_password_reset_codes, migrate_product_features, migrate_push_tokens
+from app.routers import admin, admin_content, auth, categories, content, lectures, me, speakers
 
 
 app = FastAPI(
@@ -18,6 +18,10 @@ app = FastAPI(
 
 Base.metadata.create_all(bind=engine)
 migrate_lecture_media_columns()
+migrate_password_reset_codes()
+migrate_push_tokens()
+migrate_follows()
+migrate_product_features()
 
 cors_origins = [
     origin.strip()
@@ -39,6 +43,8 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(me.router)
 app.include_router(admin.router)
+app.include_router(admin_content.router)
+app.include_router(content.router)
 app.include_router(speakers.router)
 app.include_router(categories.router)
 app.include_router(lectures.router)
