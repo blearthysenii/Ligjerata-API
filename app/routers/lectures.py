@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session, joinedload
 from urllib.parse import urlparse
 
 from app import models, schemas
@@ -125,6 +125,27 @@ def search_lectures(
             )
         )
         .order_by(models.Lecture.id.desc())
+        .all()
+    )
+
+
+@router.get("/popular", response_model=list[schemas.LectureResponse])
+def popular_lectures(db: Session = Depends(get_db)):
+    activity = (
+        db.query(
+            models.ListeningProgress.lecture_id.label("lecture_id"),
+            func.count(models.ListeningProgress.id).label("plays"),
+        )
+        .group_by(models.ListeningProgress.lecture_id)
+        .subquery()
+    )
+    return (
+        db.query(models.Lecture)
+        .outerjoin(activity, activity.c.lecture_id == models.Lecture.id)
+        .options(joinedload(models.Lecture.speaker), joinedload(models.Lecture.category))
+        .filter(models.Lecture.media_type == "audio", models.Lecture.audio_url.isnot(None))
+        .order_by(func.coalesce(activity.c.plays, 0).desc(), models.Lecture.id.desc())
+        .limit(10)
         .all()
     )
 
