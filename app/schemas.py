@@ -33,6 +33,20 @@ class UserLogin(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(pattern=r"^\d{6}$")
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
 class UserResponse(BaseModel):
     id: int
     full_name: str
@@ -155,6 +169,34 @@ class SavedLectureResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class PushTokenCreate(BaseModel):
+    token: str = Field(min_length=20, max_length=255)
+    platform: Literal["ios", "android"]
+
+
+class PushTokenResponse(BaseModel):
+    id: int
+    token: str
+    platform: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FollowedSpeakerResponse(BaseModel):
+    id: int
+    created_at: datetime
+    speaker: SpeakerResponse
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FollowedCategoryResponse(BaseModel):
+    id: int
+    created_at: datetime
+    category: CategoryResponse
+    model_config = ConfigDict(from_attributes=True)
+
+
 class MediaFromUrlRequest(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
 
@@ -163,6 +205,201 @@ class MediaIngestResponse(BaseModel):
     audio_url: str
     duration_seconds: int
     filename: str
+
+
+class RankedLecture(BaseModel):
+    lecture_id: int
+    title: str
+    count: int
+
+
+class AdminDashboardResponse(BaseModel):
+    total_users: int
+    total_lectures: int
+    total_speakers: int
+    total_categories: int
+    total_saved_lectures: int
+    listening_activity: int
+    most_listened: list[RankedLecture]
+    most_saved: list[RankedLecture]
+
+
+class AdminUserResponse(BaseModel):
+    id: int
+    full_name: str
+    email: EmailStr
+    is_active: bool
+    is_admin: bool
+    created_at: datetime
+
+
+class UserStatusUpdate(BaseModel):
+    is_active: bool
+
+
+class SeriesBase(BaseModel):
+    title: str = Field(min_length=2, max_length=255)
+    description: str | None = None
+    cover_image_url: str | None = None
+    is_active: bool = True
+
+
+class SeriesCreate(SeriesBase):
+    pass
+
+
+class SeriesUpdate(SeriesBase):
+    pass
+
+
+class SeriesResponse(SeriesBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    lecture_count: int = 0
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SeriesLectureItem(BaseModel):
+    id: int
+    order_index: int
+    lecture: LectureResponse
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SeriesDetailResponse(SeriesResponse):
+    lectures: list[SeriesLectureItem] = Field(default_factory=list)
+
+
+class SeriesMembershipUpdate(BaseModel):
+    lecture_ids: list[int] = Field(default_factory=list, max_length=500)
+
+
+class TopicBase(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    slug: str | None = Field(default=None, max_length=140)
+    is_active: bool = True
+
+
+class TopicCreate(TopicBase):
+    pass
+
+
+class TopicUpdate(TopicBase):
+    pass
+
+
+class TopicResponse(BaseModel):
+    id: int
+    name: str
+    slug: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LectureTopicsUpdate(BaseModel):
+    topic_ids: list[int] = Field(default_factory=list, max_length=100)
+
+
+class TranscriptSegmentBase(BaseModel):
+    start_seconds: int = Field(ge=0)
+    end_seconds: int = Field(ge=0)
+    text: str = Field(min_length=1, max_length=10000)
+
+    @model_validator(mode="after")
+    def validate_times(self):
+        if self.end_seconds < self.start_seconds:
+            raise ValueError("end_seconds must be after start_seconds")
+        return self
+
+
+class TranscriptSegmentCreate(TranscriptSegmentBase):
+    pass
+
+
+class TranscriptSegmentResponse(TranscriptSegmentBase):
+    id: int
+    lecture_id: int
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TranscriptReplaceRequest(BaseModel):
+    segments: list[TranscriptSegmentCreate] = Field(default_factory=list, max_length=10000)
+
+
+class TranscriptGenerateRequest(BaseModel):
+    language: str = Field(default="sq", min_length=2, max_length=10)
+
+
+class TranscriptSearchResult(BaseModel):
+    lecture: LectureResponse
+    snippet: str
+    timestamp_seconds: int
+
+
+class BookmarkCreate(BaseModel):
+    position_seconds: int = Field(ge=0)
+    label: str | None = Field(default=None, max_length=200)
+
+
+class BookmarkResponse(BaseModel):
+    id: int
+    position_seconds: int
+    label: str | None
+    created_at: datetime
+    updated_at: datetime
+    lecture: LectureResponse
+    model_config = ConfigDict(from_attributes=True)
+
+
+class NoteCreate(BaseModel):
+    position_seconds: int = Field(ge=0)
+    text: str = Field(min_length=1, max_length=5000)
+
+
+class NoteUpdate(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+
+
+class NoteResponse(BaseModel):
+    id: int
+    position_seconds: int
+    text: str
+    created_at: datetime
+    updated_at: datetime
+    lecture: LectureResponse
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ListeningStatsResponse(BaseModel):
+    today_minutes: int
+    week_minutes: int
+    current_streak: int
+    longest_streak: int
+    completed_lectures: int
+    active_days_this_week: int
+
+
+class ProfileUpdateRequest(BaseModel):
+    full_name: str = Field(min_length=2, max_length=150)
+
+    @field_validator("full_name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return " ".join(value.split())
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class DeleteAccountRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    confirmation: str = Field(min_length=1, max_length=50)
 
 
 def validate_http_url(value: str, label: str) -> None:
