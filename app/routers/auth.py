@@ -1,4 +1,7 @@
 import jwt
+import logging
+import secrets
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.exc import IntegrityError
@@ -9,9 +12,11 @@ from app.core.security import (
     create_access_token,
     decode_access_token,
     hash_password,
+    hash_reset_code,
     verify_password,
 )
 from app.database import get_db
+from app.services.email import EmailDeliveryError, send_password_reset_code
 
 
 router = APIRouter(
@@ -26,6 +31,8 @@ INVALID_CREDENTIALS = HTTPException(
     detail="Email or password is incorrect",
     headers={"WWW-Authenticate": "Bearer"},
 )
+logger = logging.getLogger(__name__)
+RESET_MESSAGE = "Nëse ekziston një llogari me këtë email, kodi është dërguar."
 
 
 def normalize_email(email: str) -> str:
@@ -162,3 +169,87 @@ def me(
         is_admin=is_admin_email(current_user.email),
         created_at=current_user.created_at,
     )
+
+
+@router.post("/forgot-password", response_model=schemas.MessageResponse)
+def forgot_password(
+    payload: schemas.ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    email = normalize_email(str(payload.email))
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user or not user.is_active:
+        return schemas.MessageResponse(message=RESET_MESSAGE)
+
+    now = datetime.now(timezone.utc)
+    recent = (
+        db.query(models.PasswordResetCode)
+        .filter(models.PasswordResetCode.user_id == user.id)
+        .order_by(models.PasswordResetCode.created_at.desc())
+        .first()
+    )
+    if recent and recent.created_at:
+        created_at = recent.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        if created_at > now - timedelta(seconds=60):
+            return schemas.MessageResponse(message=RESET_MESSAGE)
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    reset = models.PasswordResetCode(
+        user_id=user.id,
+        code_hash=hash_reset_code(user.id, code),
+        expires_at=now + timedelta(minutes=10),
+    )
+    db.add(reset)
+    db.commit()
+    try:
+        send_password_reset_code(email, code)
+    except EmailDeliveryError:
+        db.delete(reset)
+        db.commit()
+        logger.warning("Password reset email delivery failed")
+    return schemas.MessageResponse(message=RESET_MESSAGE)
+
+
+@router.post("/reset-password", response_model=schemas.MessageResponse)
+def reset_password(
+    payload: schemas.ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    email = normalize_email(str(payload.email))
+    user = db.query(models.User).filter(models.User.email == email).first()
+    invalid = HTTPException(status_code=400, detail="Kodi është i pavlefshëm ose ka skaduar.")
+    if not user or not user.is_active:
+        raise invalid
+
+    now = datetime.now(timezone.utc)
+    reset = (
+        db.query(models.PasswordResetCode)
+        .filter(
+            models.PasswordResetCode.user_id == user.id,
+            models.PasswordResetCode.used_at.is_(None),
+        )
+        .order_by(models.PasswordResetCode.created_at.desc())
+        .first()
+    )
+    if not reset:
+        raise invalid
+    expires_at = reset.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= now or reset.attempts >= 5:
+        raise invalid
+
+    if not secrets.compare_digest(reset.code_hash, hash_reset_code(user.id, payload.code)):
+        reset.attempts += 1
+        db.commit()
+        raise invalid
+
+    user.hashed_password = hash_password(payload.new_password)
+    db.query(models.PasswordResetCode).filter(
+        models.PasswordResetCode.user_id == user.id,
+        models.PasswordResetCode.used_at.is_(None),
+    ).update({models.PasswordResetCode.used_at: now}, synchronize_session=False)
+    db.commit()
+    return schemas.MessageResponse(message="Fjalëkalimi u ndryshua me sukses.")
