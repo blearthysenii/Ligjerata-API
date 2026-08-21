@@ -2,9 +2,12 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, or_
+from fastapi import Query
+from app.core.admin import is_admin_email
 from sqlalchemy.orm import Session, joinedload
 
 from app import models, schemas
@@ -18,6 +21,7 @@ from app.services.media import (
     ingest_url,
     validate_upload_metadata,
 )
+from app.services.notifications import send_new_lecture_notifications
 
 
 router = APIRouter(
@@ -25,6 +29,92 @@ router = APIRouter(
     tags=["Administration"],
     dependencies=[Depends(require_admin)],
 )
+
+
+@router.get("/dashboard", response_model=schemas.AdminDashboardResponse)
+def dashboard(db: Session = Depends(get_db)):
+    listened = (
+        db.query(
+            models.Lecture.id,
+            models.Lecture.title,
+            func.count(models.ListeningProgress.id).label("count"),
+        )
+        .join(models.ListeningProgress, models.ListeningProgress.lecture_id == models.Lecture.id)
+        .group_by(models.Lecture.id, models.Lecture.title)
+        .order_by(func.count(models.ListeningProgress.id).desc())
+        .limit(5)
+        .all()
+    )
+    saved = (
+        db.query(
+            models.Lecture.id,
+            models.Lecture.title,
+            func.count(models.SavedLecture.id).label("count"),
+        )
+        .join(models.SavedLecture, models.SavedLecture.lecture_id == models.Lecture.id)
+        .group_by(models.Lecture.id, models.Lecture.title)
+        .order_by(func.count(models.SavedLecture.id).desc())
+        .limit(5)
+        .all()
+    )
+    return {
+        "total_users": db.query(models.User).count(),
+        "total_lectures": db.query(models.Lecture).count(),
+        "total_speakers": db.query(models.Speaker).count(),
+        "total_categories": db.query(models.Category).count(),
+        "total_saved_lectures": db.query(models.SavedLecture).count(),
+        "listening_activity": db.query(models.ListeningProgress).count(),
+        "most_listened": [
+            {"lecture_id": row.id, "title": row.title, "count": row.count}
+            for row in listened
+        ],
+        "most_saved": [
+            {"lecture_id": row.id, "title": row.title, "count": row.count}
+            for row in saved
+        ],
+    }
+
+
+def admin_user_response(user: models.User) -> dict:
+    return {
+        "id": user.id, "full_name": user.full_name, "email": user.email,
+        "is_active": user.is_active, "is_admin": is_admin_email(user.email),
+        "created_at": user.created_at,
+    }
+
+
+@router.get("/users", response_model=list[schemas.AdminUserResponse])
+def list_users(q: str | None = Query(default=None, max_length=100), db: Session = Depends(get_db)):
+    query = db.query(models.User)
+    if q and q.strip():
+        pattern = f"%{q.strip()}%"
+        query = query.filter(or_(models.User.full_name.ilike(pattern), models.User.email.ilike(pattern)))
+    return [admin_user_response(user) for user in query.order_by(models.User.created_at.desc()).limit(100).all()]
+
+
+@router.get("/users/{user_id}", response_model=schemas.AdminUserResponse)
+def user_detail(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return admin_user_response(user)
+
+
+@router.patch("/users/{user_id}/status", response_model=schemas.AdminUserResponse)
+def update_user_status(
+    user_id: int,
+    payload: schemas.UserStatusUpdate,
+    current_admin: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.id == current_admin.id and not payload.is_active:
+        raise HTTPException(status_code=409, detail="You cannot disable your own account")
+    user.is_active = payload.is_active
+    db.commit(); db.refresh(user)
+    return admin_user_response(user)
 
 
 def get_speaker_or_404(speaker_id: int, db: Session) -> models.Speaker:
@@ -157,6 +247,7 @@ def list_lectures(db: Session = Depends(get_db)):
 )
 def create_lecture(
     payload: schemas.LectureCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     ensure_audio_lecture(payload)
@@ -167,6 +258,22 @@ def create_lecture(
     db.add(lecture)
     db.commit()
     db.refresh(lecture)
+    follower_ids = db.query(models.FollowedSpeaker.user_id.label("user_id")).filter(
+        models.FollowedSpeaker.speaker_id == lecture.speaker_id
+    ).union(
+        db.query(models.FollowedCategory.user_id.label("user_id")).filter(
+            models.FollowedCategory.category_id == lecture.category_id
+        )
+    ).subquery()
+    tokens = [row.token for row in db.query(models.PushToken.token).filter(
+        models.PushToken.user_id.in_(db.query(follower_ids.c.user_id))
+    ).all()]
+    background_tasks.add_task(
+        send_new_lecture_notifications,
+        tokens,
+        lecture.id,
+        lecture.speaker.name,
+    )
     return lecture
 
 
