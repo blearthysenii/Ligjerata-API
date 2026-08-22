@@ -57,6 +57,17 @@ def dashboard(db: Session = Depends(get_db)):
         .limit(5)
         .all()
     )
+    feedback_count = db.query(models.LectureFeedback).count()
+    helpful_feedback_count = db.query(models.LectureFeedback).filter_by(value="helpful").count()
+    helpful = (
+        db.query(models.Lecture.id, models.Lecture.title, func.count(models.LectureFeedback.id).label("count"))
+        .join(models.LectureFeedback, models.LectureFeedback.lecture_id == models.Lecture.id)
+        .filter(models.LectureFeedback.value == "helpful")
+        .group_by(models.Lecture.id, models.Lecture.title)
+        .order_by(func.count(models.LectureFeedback.id).desc())
+        .limit(5)
+        .all()
+    )
     return {
         "total_users": db.query(models.User).count(),
         "total_lectures": db.query(models.Lecture).count(),
@@ -72,6 +83,10 @@ def dashboard(db: Session = Depends(get_db)):
             {"lecture_id": row.id, "title": row.title, "count": row.count}
             for row in saved
         ],
+        "feedback_count": feedback_count,
+        "helpful_feedback_count": helpful_feedback_count,
+        "helpful_feedback_rate": round((helpful_feedback_count / feedback_count * 100) if feedback_count else 0, 1),
+        "most_helpful": [{"lecture_id": row.id, "title": row.title, "count": row.count} for row in helpful],
     }
 
 
@@ -258,12 +273,22 @@ def create_lecture(
     db.add(lecture)
     db.commit()
     db.refresh(lecture)
-    follower_ids = db.query(models.FollowedSpeaker.user_id.label("user_id")).filter(
-        models.FollowedSpeaker.speaker_id == lecture.speaker_id
-    ).union(
-        db.query(models.FollowedCategory.user_id.label("user_id")).filter(
-            models.FollowedCategory.category_id == lecture.category_id
-        )
+    speaker_followers = db.query(models.FollowedSpeaker.user_id.label("user_id")).outerjoin(
+        models.NotificationPreference,
+        models.NotificationPreference.user_id == models.FollowedSpeaker.user_id,
+    ).filter(
+        models.FollowedSpeaker.speaker_id == lecture.speaker_id,
+        or_(models.NotificationPreference.id.is_(None), models.NotificationPreference.followed_speakers_enabled.is_(True)),
+    )
+    category_followers = db.query(models.FollowedCategory.user_id.label("user_id")).outerjoin(
+        models.NotificationPreference,
+        models.NotificationPreference.user_id == models.FollowedCategory.user_id,
+    ).filter(
+        models.FollowedCategory.category_id == lecture.category_id,
+        or_(models.NotificationPreference.id.is_(None), models.NotificationPreference.followed_categories_enabled.is_(True)),
+    )
+    follower_ids = speaker_followers.union(
+        category_followers
     ).subquery()
     tokens = [row.token for row in db.query(models.PushToken.token).filter(
         models.PushToken.user_id.in_(db.query(follower_ids.c.user_id))
@@ -272,6 +297,7 @@ def create_lecture(
         send_new_lecture_notifications,
         tokens,
         lecture.id,
+        lecture.title,
         lecture.speaker.name,
     )
     return lecture
