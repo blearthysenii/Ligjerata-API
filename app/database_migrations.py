@@ -3,6 +3,15 @@ from sqlalchemy import text
 from app.database import engine
 
 
+def migrate_user_date_of_birth() -> None:
+    """Add an optional birth date without changing existing accounts."""
+    with engine.begin() as connection:
+        connection.execute(text("""
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS date_of_birth DATE
+        """))
+
+
 def migrate_lecture_media_columns() -> None:
     """Add media columns without replacing or deleting existing data."""
     statements = (
@@ -146,6 +155,30 @@ def migrate_product_features() -> None:
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CONSTRAINT uq_listening_activity_day UNIQUE(user_id, lecture_id, activity_date))""",
         "CREATE INDEX IF NOT EXISTS ix_listening_activity_user_date ON listening_activity(user_id, activity_date)",
+    )
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
+def migrate_personalization_features() -> None:
+    """Add private personalization tables without modifying existing records."""
+    statements = (
+        """CREATE TABLE IF NOT EXISTS user_preferences (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE, listening_frequency VARCHAR(30) NOT NULL DEFAULT 'none', onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_user_preferences_user_id ON user_preferences(user_id)",
+        """CREATE TABLE IF NOT EXISTS followed_topics (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CONSTRAINT uq_followed_topic UNIQUE(user_id, topic_id))""",
+        "CREATE INDEX IF NOT EXISTS ix_followed_topics_user_id ON followed_topics(user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_followed_topics_topic_id ON followed_topics(topic_id)",
+        """CREATE TABLE IF NOT EXISTS user_playlists (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, title VARCHAR(120) NOT NULL, description TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        "CREATE INDEX IF NOT EXISTS ix_user_playlists_user_id ON user_playlists(user_id)",
+        """CREATE TABLE IF NOT EXISTS user_playlist_lectures (id SERIAL PRIMARY KEY, playlist_id INTEGER NOT NULL REFERENCES user_playlists(id) ON DELETE CASCADE, lecture_id INTEGER NOT NULL REFERENCES lectures(id) ON DELETE CASCADE, order_index INTEGER NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CONSTRAINT uq_user_playlist_lecture UNIQUE(playlist_id, lecture_id), CONSTRAINT uq_user_playlist_order UNIQUE(playlist_id, order_index))""",
+        "CREATE INDEX IF NOT EXISTS ix_user_playlist_lectures_playlist_id ON user_playlist_lectures(playlist_id)",
+        "CREATE INDEX IF NOT EXISTS ix_user_playlist_lectures_lecture_id ON user_playlist_lectures(lecture_id)",
+        """CREATE TABLE IF NOT EXISTS notification_preferences (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE, followed_speakers_enabled BOOLEAN NOT NULL DEFAULT TRUE, followed_categories_enabled BOOLEAN NOT NULL DEFAULT TRUE, new_series_enabled BOOLEAN NOT NULL DEFAULT TRUE, recommendations_enabled BOOLEAN NOT NULL DEFAULT TRUE, daily_reminder_enabled BOOLEAN NOT NULL DEFAULT FALSE, daily_reminder_time VARCHAR(5), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_notification_preferences_user_id ON notification_preferences(user_id)",
+        """CREATE TABLE IF NOT EXISTS lecture_feedback (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, lecture_id INTEGER NOT NULL REFERENCES lectures(id) ON DELETE CASCADE, value VARCHAR(20) NOT NULL CHECK (value IN ('helpful','not_for_me')), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CONSTRAINT uq_lecture_feedback_user_lecture UNIQUE(user_id, lecture_id))""",
+        "CREATE INDEX IF NOT EXISTS ix_lecture_feedback_user_id ON lecture_feedback(user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_lecture_feedback_lecture_id ON lecture_feedback(lecture_id)",
     )
     with engine.begin() as connection:
         for statement in statements:
