@@ -54,6 +54,7 @@ def create_token_response(user: models.User) -> schemas.TokenResponse:
             is_active=user.is_active,
             is_admin=is_admin_email(user.email),
             created_at=user.created_at,
+            date_of_birth=user.date_of_birth,
         ),
     )
 
@@ -107,6 +108,7 @@ def register(
         full_name=payload.full_name,
         email=email,
         hashed_password=hash_password(payload.password),
+        date_of_birth=payload.date_of_birth,
     )
     db.add(user)
 
@@ -152,6 +154,22 @@ def login(
     return create_token_response(user)
 
 
+@router.post(
+    "/check-email",
+    response_model=schemas.EmailLookupResponse,
+)
+def check_email(
+    payload: schemas.EmailLookupRequest,
+    db: Session = Depends(get_db),
+):
+    email = normalize_email(str(payload.email))
+    exists = db.query(models.User.id).filter(
+        models.User.email == email,
+        models.User.is_active.is_(True),
+    ).first() is not None
+    return schemas.EmailLookupResponse(exists=exists)
+
+
 @router.get(
     "/me",
     response_model=schemas.UserResponse,
@@ -168,6 +186,7 @@ def me(
         is_active=current_user.is_active,
         is_admin=is_admin_email(current_user.email),
         created_at=current_user.created_at,
+        date_of_birth=current_user.date_of_birth,
     )
 
 
