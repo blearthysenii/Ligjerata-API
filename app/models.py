@@ -21,6 +21,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     full_name = Column(String(150), nullable=False)
+    date_of_birth = Column(Date, nullable=True)
     email = Column(
         String(320),
         unique=True,
@@ -416,4 +417,70 @@ class ListeningActivity(Base):
     lecture_id = Column(Integer, ForeignKey("lectures.id", ondelete="CASCADE"), nullable=False, index=True)
     activity_date = Column(Date, nullable=False)
     seconds_listened = Column(Integer, nullable=False, default=0, server_default="0")
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    listening_frequency = Column(String(30), nullable=False, default="none", server_default="none")
+    onboarding_completed = Column(Boolean, nullable=False, default=False, server_default="false")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class FollowedTopic(Base):
+    __tablename__ = "followed_topics"
+    __table_args__ = (UniqueConstraint("user_id", "topic_id", name="uq_followed_topic"),)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    topic_id = Column(Integer, ForeignKey("topics.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class UserPlaylist(Base):
+    __tablename__ = "user_playlists"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String(120), nullable=False)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    lectures = relationship("UserPlaylistLecture", cascade="all, delete-orphan", order_by="UserPlaylistLecture.order_index")
+
+
+class UserPlaylistLecture(Base):
+    __tablename__ = "user_playlist_lectures"
+    __table_args__ = (UniqueConstraint("playlist_id", "lecture_id", name="uq_user_playlist_lecture"), UniqueConstraint("playlist_id", "order_index", name="uq_user_playlist_order"))
+    id = Column(Integer, primary_key=True)
+    playlist_id = Column(Integer, ForeignKey("user_playlists.id", ondelete="CASCADE"), nullable=False, index=True)
+    lecture_id = Column(Integer, ForeignKey("lectures.id", ondelete="CASCADE"), nullable=False, index=True)
+    order_index = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    lecture = relationship("Lecture")
+
+
+class NotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    followed_speakers_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    followed_categories_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    new_series_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    recommendations_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    daily_reminder_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    daily_reminder_time = Column(String(5), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class LectureFeedback(Base):
+    __tablename__ = "lecture_feedback"
+    __table_args__ = (UniqueConstraint("user_id", "lecture_id", name="uq_lecture_feedback_user_lecture"),)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    lecture_id = Column(Integer, ForeignKey("lectures.id", ondelete="CASCADE"), nullable=False, index=True)
+    value = Column(String(20), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
