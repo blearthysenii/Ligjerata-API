@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import (
@@ -16,6 +16,7 @@ class UserRegister(BaseModel):
     full_name: str = Field(min_length=2, max_length=150)
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
+    date_of_birth: date
 
     @field_validator("full_name")
     @classmethod
@@ -27,10 +28,25 @@ class UserRegister(BaseModel):
 
         return normalized
 
+    @field_validator("date_of_birth")
+    @classmethod
+    def validate_date_of_birth(cls, value: date) -> date:
+        if value > date.today():
+            raise ValueError("Date of birth cannot be in the future")
+        return value
+
 
 class UserLogin(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=128)
+
+
+class EmailLookupRequest(BaseModel):
+    email: EmailStr
+
+
+class EmailLookupResponse(BaseModel):
+    exists: bool
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -54,6 +70,7 @@ class UserResponse(BaseModel):
     is_active: bool
     is_admin: bool
     created_at: datetime
+    date_of_birth: date | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -222,6 +239,10 @@ class AdminDashboardResponse(BaseModel):
     listening_activity: int
     most_listened: list[RankedLecture]
     most_saved: list[RankedLecture]
+    feedback_count: int = 0
+    helpful_feedback_count: int = 0
+    helpful_feedback_rate: float = 0
+    most_helpful: list[RankedLecture] = Field(default_factory=list)
 
 
 class AdminUserResponse(BaseModel):
@@ -400,6 +421,72 @@ class ChangePasswordRequest(BaseModel):
 class DeleteAccountRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=128)
     confirmation: str = Field(min_length=1, max_length=50)
+
+
+class OnboardingResponse(BaseModel):
+    listening_frequency: Literal["daily", "weekly", "none"] = "none"
+    onboarding_completed: bool = False
+
+
+class OnboardingUpdate(OnboardingResponse):
+    category_ids: list[int] = Field(default_factory=list, max_length=100)
+    speaker_ids: list[int] = Field(default_factory=list, max_length=100)
+    topic_ids: list[int] = Field(default_factory=list, max_length=100)
+
+
+class PlaylistCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=1000)
+
+
+class PlaylistUpdate(PlaylistCreate):
+    pass
+
+
+class PlaylistLectureResponse(BaseModel):
+    id: int
+    order_index: int
+    lecture: LectureResponse
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PlaylistResponse(BaseModel):
+    id: int
+    title: str
+    description: str | None
+    created_at: datetime
+    updated_at: datetime
+    lectures: list[PlaylistLectureResponse] = Field(default_factory=list)
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PlaylistReorder(BaseModel):
+    lecture_ids: list[int] = Field(max_length=500)
+
+
+class NotificationPreferenceResponse(BaseModel):
+    followed_speakers_enabled: bool = True
+    followed_categories_enabled: bool = True
+    new_series_enabled: bool = True
+    recommendations_enabled: bool = True
+    daily_reminder_enabled: bool = False
+    daily_reminder_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+class NotificationPreferenceUpdate(NotificationPreferenceResponse):
+    pass
+
+
+class FeedbackUpdate(BaseModel):
+    value: Literal["helpful", "not_for_me"]
+
+
+class FeedbackResponse(FeedbackUpdate):
+    id: int
+    lecture_id: int
+    created_at: datetime
+    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
 
 
 def validate_http_url(value: str, label: str) -> None:
